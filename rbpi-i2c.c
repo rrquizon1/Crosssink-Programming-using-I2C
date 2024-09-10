@@ -1,283 +1,187 @@
 #include <stdio.h>
-#include <gpiod.h>
+#include <stdlib.h>
+#include <fcntl.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/i2c-dev.h>
+#include <i2c/smbus.h>  // Using libi2c-dev for SMBus operations
+#include <string.h>
 #include "rbpi-i2c.h"
-#include "global.h"
-#include <stdio.h>
+
+#define I2C_BUS "/dev/i2c-1"  // Replace with your I2C bus path
+#define DEVICE_ADDR 0x40      // Replace with your I2C device address
+
+int fd;
 
 
-/*Written by Rhodz */
+int i2c_init(){
+   fd = open(I2C_BUS, O_RDWR);
+        // Open the I2C bus
+
+    if (fd < 0) {
+        perror("Failed to open the I2C bus");
+        return EXIT_FAILURE;
+    }
+    
+    
+
+    // Set the I2C slave address
+    if (ioctl(fd, I2C_SLAVE, DEVICE_ADDR) < 0) {
+        perror("Failed to acquire bus access and/or talk to slave");
+        close(fd);
+        return EXIT_FAILURE;
+    }
+
+   if (ioctl(fd, I2C_TIMEOUT, 10000) < 0) {
+        perror("Failed to set I2C timeout");
+        close(fd);
+        return 1;
+    }
+  
+    
+}
 
 
-char a='A';// Dummy character needed for lbgpiod functions
-int pull_up=0; //to enable pull up. It is always enabled by default
+int i2c_write_byte(int length, unsigned char *data_bytes){
+    struct i2c_msg msgs[1];
+    int num_msgs = 1;
+    
+    // First message: Write command bytes (without stop)
+    msgs[0].addr = DEVICE_ADDR;
+    msgs[0].flags = 0;  // No stop
+    msgs[0].len = length;
+    msgs[0].buf = data_bytes;
+    
+    struct i2c_rdwr_ioctl_data ioctl_data;
+    ioctl_data.msgs = msgs;
+    ioctl_data.nmsgs = num_msgs;
 
-/* configure_input() sets the pin to input preparing for receiving data.
- * 
- * 
- * */
+    // Perform combined write and read operation
+    if (ioctl(fd, I2C_RDWR, &ioctl_data) < 0) {
+        perror("Failed to perform write I2C transaction");
+       // close(fd);
+        return EXIT_FAILURE;
+    }
+    
+} 
 
-int configure_input(struct gpiod_line *line, const char *consumer, int pull_up)
-{
-    struct gpiod_line_request_config config = {
-        .consumer = consumer,
-        .request_type = GPIOD_LINE_REQUEST_DIRECTION_INPUT,
-        .flags = pull_up ? GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP : GPIOD_LINE_REQUEST_FLAG_BIAS_DISABLE
-    };
+int i2c_read_byte(int length, unsigned char *a_ByteRead, int send_ack){
+    struct i2c_msg msgs[1];
+    int num_msgs = 1;
+    
+    // Second message: Read 4 bytes of data
+    msgs[0].addr = DEVICE_ADDR;
+    msgs[0].flags = I2C_M_RD;  // Read flag
+    msgs[0].len = length;
+    msgs[0].buf = a_ByteRead;
 
-    if (gpiod_line_request(line, &config,1) < 0)
-    {
-        perror("Request line as input failed");
+
+    struct i2c_rdwr_ioctl_data ioctl_data;
+    ioctl_data.msgs = msgs;
+    ioctl_data.nmsgs = num_msgs;
+
+    // Perform combined write and read operation
+    if (ioctl(fd, I2C_RDWR, &ioctl_data) < 0) {
+        perror("Failed to perform read I2C transaction");
+       // close(fd);
+        return EXIT_FAILURE;
+    }
+    
+    
+}
+int i2c_write_and_read(unsigned char *write_data, int write_len, unsigned char *read_data, int read_len) {
+    struct i2c_msg msgs[2];
+    struct i2c_rdwr_ioctl_data ioctl_data;
+
+    // Prepare the write message
+    msgs[0].addr = DEVICE_ADDR;
+    msgs[0].flags = 0;  // Write
+    msgs[0].len = write_len;
+    msgs[0].buf = write_data;
+
+    // Prepare the read message
+    msgs[1].addr = DEVICE_ADDR;
+    msgs[1].flags = I2C_M_RD;  // Read
+    msgs[1].len = read_len;
+    msgs[1].buf = read_data;
+
+    // Prepare the ioctl data structure
+    ioctl_data.msgs = msgs;
+    ioctl_data.nmsgs = 2;
+
+    // Perform the combined write/read operation
+    if (ioctl(fd, I2C_RDWR, &ioctl_data) < 0) {
+        perror("Failed to perform combined I2C transaction");
         return -1;
     }
 
-    return 0;
-}
-/* configure_output() sets the pin to output used when sending data. Since this is I2C master SCL is always output. SDA changes when writing or reading.
- * */
-int configure_output(struct gpiod_line *line, const char *consumer, int value)
-{
-    if (gpiod_line_request_output(line, consumer, value) < 0)
-    {
-        perror("Request line as output failed");
-        return -1;
+    return 0;}
+
+
+int i2c_write_long(unsigned char *write_command, int writecomm_len, unsigned char *write_data, int writedata_len) {
+  struct i2c_rdwr_ioctl_data ioctl_data;  
+
+if (writedata_len<=32 ){
+    struct i2c_msg msgs[2];
+    
+    unsigned char *buffers[2] = {write_command, write_data};
+    int lengths[2] = {writecomm_len, writedata_len};
+    // Prepare the I2C messages using a loop
+    for (int i = 0; i < 2; i++) {
+        msgs[i].addr = DEVICE_ADDR;
+        msgs[i].flags = 0;  // Write
+        msgs[i].len = lengths[i];
+        msgs[i].buf = buffers[i];
     }
 
-    return 0;
-}
-
-/* i2c_init() initializes the i2c bus and preparation for the start condition
- * 
- * 
- * */
-int i2c_init(struct gpiod_line **i2c_sda,struct gpiod_line **i2c_scl){
-    struct gpiod_chip *chip;
-
-    
-    
-    int offset_sda = 20; // Replace with your GPIO pin number for SDA
-    int offset_scl = 16; // Replace with your GPIO pin number for SCL
-    
-    chip = gpiod_chip_open("/dev/gpiochip4"); // Replace 4 with the appropriate chip number
-
-    if (!chip) {
-        perror("Open chip failed");
-        return 1;
-    }
-
-    *i2c_sda= gpiod_chip_get_line(chip, offset_sda);
-    *i2c_scl= gpiod_chip_get_line(chip, offset_scl);
-
-    if (!*i2c_sda) {
-        perror("Get line failed");
-        gpiod_chip_close(chip);
-        return 1;
-    }
-    
-    if (!*i2c_scl) {
-        perror("Get line failed");
-        gpiod_chip_close(chip);
-        return 1;
-    }
-
-     configure_output(*i2c_sda, &a, 1);
-     configure_output(*i2c_scl, &a, 1);
- 
-    usleep(10);
-
-    usleep(10);
-
-    usleep(10);
-    return 0;
-    
-}
-/* i2c_start() sets the i2c start condition*/
-
-void i2c_start() {
-
-    gpiod_line_set_value(i2c_sda, 1);
-    gpiod_line_set_value(i2c_scl, 1);
-    usleep(10);
-    gpiod_line_set_value(i2c_sda, 0);
-    usleep(10);
-    gpiod_line_set_value(i2c_scl, 0);
-    usleep(10);
-
-    
+     ioctl_data.msgs = msgs;
+    ioctl_data.nmsgs = 2;
     
 }
 
+else {
+    int chunk_size = 4096;  // Define the chunk size in bytes
+    int num_bytes_command = writecomm_len;  // Length in bytes for command data
+    int num_bytes_data = writedata_len;  // Length in bytes for data
+    int total_len_bytes = num_bytes_command + num_bytes_data;  // Total length in bytes
+    int num_chunks = (total_len_bytes + chunk_size - 1) / chunk_size;  // Calculate number of chunks
 
-/* i2c_write_byte() sends the data and checks slave acknowledgement*/
-int i2c_write_byte(int length, unsigned char *data_bytes) {
-    int bytes = (length + 7) / 8;
+    struct i2c_msg msgs[num_chunks];  // Array to hold I2C messages
 
-    for (int j = 0; j < bytes; j++) {
-        unsigned char data = data_bytes[j];
+    // Combine write_command and write_data into a single buffer  
+    unsigned char combined_buffer[total_len_bytes];
+    memcpy(combined_buffer, write_command, num_bytes_command);  // Copy command data
+    memcpy(combined_buffer + num_bytes_command, write_data, num_bytes_data);  // Copy data
 
-        for (int i = 0; i < 8; i++) {
-            if (data & 0x80) {
+    // Prepare the I2C messages using a loop
+    for (int i = 0; i < num_chunks; i++) {
+        msgs[i].addr = DEVICE_ADDR;
+        msgs[i].flags = 0;  // Write
 
-                 gpiod_line_set_value(i2c_sda, 1);
-            } else {
-                gpiod_line_set_value(i2c_sda, 0); // Drive SDA low
-            }
+        // Calculate the size of the current chunk
+        int current_chunk_size = (i == num_chunks - 1) ? (total_len_bytes % chunk_size) : chunk_size;
+        if (current_chunk_size == 0) current_chunk_size = chunk_size;  // Handle case where the last chunk is exactly chunk_size bytes
 
-            // Clock high
-            gpiod_line_set_value(i2c_scl, 1);
-
-
-            // Clock low
-            gpiod_line_set_value(i2c_scl, 0);
-
-            data <<= 1; // Shift data left by 1 bit
-        }
-
-        // Check for ACK/NACK
-        gpiod_line_release(i2c_sda);
-        configure_input(i2c_sda, &a, pull_up); // Release SDA for ACK/NACK
-        usleep(10); // Adjust timing as needed
-
-        gpiod_line_set_value(i2c_scl, 1); // Clock high for ACK/NACK
-        usleep(10); // Adjust timing as needed
-
-        int ack = !gpiod_line_get_value(i2c_sda); // Check if SDA is low (ACK)
-        usleep(10); // Adjust timing as needed
-
-        gpiod_line_set_value(i2c_scl, 0); // Clock low after ACK/NACK
-        gpiod_line_release(i2c_sda); //Release SDA in preparation for read out
-        usleep(10); // Adjust timing as needed
-
-        if (ack != 1) {
-            return -1; // NACK received, handle error or retry
-        }
-
-        usleep(1);
-        configure_output(i2c_sda, &a, 1);
-    }
-
-    return 0; 
-}
-
-/*i2c_stop() sends stop condition*/
-
-void i2c_stop()
-{
-    // Ensure SDA is low
-    gpiod_line_release(i2c_sda);
-    configure_output(i2c_sda, &a, 0);
-    usleep(1);
-
-    // Clock SCL high
-    
-    gpiod_line_set_value(i2c_scl, 1);
-    usleep(1);
-    gpiod_line_set_value(i2c_scl, 1);
-    usleep(1);
-
-    // Release SCL
-    
-    
-    gpiod_line_release(i2c_sda);
-    gpiod_line_release(i2c_scl);
-    usleep(100);
-    
-     configure_output(i2c_sda, &a, 1);
-     configure_output(i2c_scl, &a, 1);
-}
-
-/*i2c_read_bit() used for reading input during read out*/
-
-int i2c_read_bit() {
-    int bit;
-
-
-    gpiod_line_set_value(i2c_scl, 1);
-    usleep(1);
-
-    bit = gpiod_line_get_value(i2c_sda);
-
-    
-
-    gpiod_line_set_value(i2c_scl, 0);
-    
-    gpiod_line_release(i2c_sda);
-    return bit;
-}
-
-
-
-
-/* send acknowledge bit*/
-
-void i2c_send_ack() {
-    configure_output(i2c_sda, &a, 0); // Drive SDA low (send ACK)
-    usleep(1); 
-    
-    gpiod_line_set_value(i2c_scl, 1); // Clock SCL high
-    usleep(1); 
-    
-    gpiod_line_set_value(i2c_scl, 0); // Clock SCL low
-    usleep(1); 
-    
-    gpiod_line_release(i2c_sda); // Release SDA
-}
-
-/* send nack */
-
-
-void i2c_send_nack() {
-    gpiod_line_release(i2c_sda); // Release SDA
-    usleep(1); 
-    
-    configure_input(i2c_sda, &a, pull_up); // Set SDA high to send NACK
-    usleep(1); 
-    
-    gpiod_line_set_value(i2c_scl, 1); // Clock SCL high
-    usleep(1); 
-    
-    gpiod_line_set_value(i2c_scl, 0); // Clock SCL low
-    usleep(1);
-    
-    gpiod_line_release(i2c_sda); // Release SDA
-}
-
-
-
-/* i2c_read_bytes() reads multiple bytes and send ack or nack depending on the command */
-
-int i2c_read_bytes(int length, unsigned char *a_ByteRead, int send_ack) {
-    gpiod_line_release(i2c_sda); // Release SDA
-    int bytes = (length + 7) / 8; // Calculate the number of bytes to read
-
-    for (int i = 0; i < bytes; i++) {
-        unsigned char byte = 0;
-
-        // Read each bit of the byte
-        for (int j = 0; j < 8; j++) {
-            
-            configure_input(i2c_sda, &a, pull_up);
-            usleep(10);
-        byte = (byte << 1) | i2c_read_bit();
+        msgs[i].len = current_chunk_size;
+        msgs[i].buf = &combined_buffer[i * chunk_size];  // Point to the start of the current chunk in the buffer
         
-            }
-		usleep(10);
+        // Print the contents of msgs[i].buf
 
-        a_ByteRead[i] = byte;
-
-        usleep(10); // Small delay for timing
-
-        // Send ACK for all but the last byte or send NACK if it's the last byte and send_ack is 0
-       if (i < bytes - 1 || send_ack) {
-            i2c_send_ack();
-        } else {
-           i2c_send_nack();
-        }
     }
 
-    // Release SDA and SCL lines after reading all bytes
-    gpiod_line_release(i2c_sda);
+    // Prepare the ioctl data structure
+    ioctl_data.msgs = msgs;
+    ioctl_data.nmsgs = num_chunks;
+   // printf("Num of Chunks: %d ",num_chunks);
     
+}
+
+    // Perform the combined write operation
+    if (ioctl(fd, I2C_RDWR, &ioctl_data) < 0) {
+        perror("Failed to perform combined I2C transaction");
+        return -1;
+    }
 
     return 0;
 }
+
