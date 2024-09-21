@@ -6,6 +6,6 @@ int i2c_write_byte(int length, unsigned char *data_bytes);
 int i2c_write_and_read( unsigned char *write_data, int write_len, unsigned char *read_data, int read_len);
 int i2c_init();
 int i2c_write_long(unsigned char *write_command, int writecomm_len, unsigned char *write_data, int writedata_len);
-
+extern struct gpiod_line *cs;
 
 #endif

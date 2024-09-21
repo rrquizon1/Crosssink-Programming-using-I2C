@@ -7,14 +7,52 @@
 #include <i2c/smbus.h>  // Using libi2c-dev for SMBus operations
 #include <string.h>
 #include "rbpi-i2c.h"
+#include <gpiod.h>
 
 #define I2C_BUS "/dev/i2c-1"  // Replace with your I2C bus path
 #define DEVICE_ADDR 0x40      // Replace with your I2C device address
 
 int fd;
 
+char a='A';// Dummy character needed for lbgpiod functions
+int pull_up=0; //to enable pull up. It is always enabled by default
 
-int i2c_init(){
+/* configure_output() sets the pin to output used when sending data. Since this is I2C master SCL is always output. SDA changes when writing or reading.
+ * */
+int configure_output(struct gpiod_line *line, const char *consumer, int value)
+{
+    if (gpiod_line_request_output(line, consumer, value) < 0)
+    {
+        perror("Request line as output failed");
+        return -1;
+    }
+
+    return 0;
+}
+
+
+int i2c_init(struct gpiod_line **cs){
+   struct gpiod_chip *chip;
+   int offset_cs = 21; // Replace with your GPIO pin number for CS
+   chip = gpiod_chip_open("/dev/gpiochip4"); // Replace 4 with the appropriate chip number
+   
+    *cs= gpiod_chip_get_line(chip, offset_cs);
+
+    if (!chip) {
+        perror("Open chip failed");
+        return 1;
+    }
+
+       if (!*cs) {
+        perror("Get line failed");
+        gpiod_chip_close(chip);
+        return 1;
+    }
+    
+   configure_output(*cs, &a, 0);
+   // usleep(1000);
+  // configure_output(*cs, &a, 1);
+   
    fd = open(I2C_BUS, O_RDWR);
         // Open the I2C bus
 

@@ -8,9 +8,11 @@
 #include <string.h>
 #include "rbpi-i2c.h"
 #include "data.h"
-
+#include <gpiod.h>
+struct gpiod_line *cs;
+//char a='A';// Dummy character needed for lbgpiod functions
 int main() {
-  
+    
     unsigned char device_ID[4] = { 0xE0, 0x00, 0x00, 0x00  }; // Command bytes to send (E0 00 00 00)
     unsigned char isc_enable[4] = { 0xC6, 0x00, 0x00, 0x00  }; // Command bytes to send (C6 00 00 00)
     unsigned char isc_disable[4] = { 0x26, 0x00, 0x00, 0x00  }; // Command bytes to send (26 00 00 00)
@@ -26,14 +28,21 @@ int main() {
     int global_length=4;
 
 
-    i2c_init();
-    
-   
-        
+    i2c_init(&cs);
+    gpiod_line_set_value(cs, 1);
+    usleep(1000);
+    gpiod_line_set_value(cs, 0);
+    usleep(1000);
     i2c_write_byte(5,activation_key);
+    usleep(1000);
+    gpiod_line_set_value(cs, 1);
     
+    usleep(10000);
+    
+    
+   printf("Activation Key Sent:\n");
    for (int i = 0; i < 4; i++) {
-       printf("0x%02X ",global_write_buf[i]);
+       printf("0x%02X ",activation_key[i]);
        printf("\n");
    }
 //i2c read operation   
