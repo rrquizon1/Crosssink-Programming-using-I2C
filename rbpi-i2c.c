@@ -31,27 +31,26 @@ int configure_output(struct gpiod_line *line, const char *consumer, int value)
 }
 
 
-int i2c_init(struct gpiod_line **cs){
+int i2c_init(struct gpiod_line **crst){
    struct gpiod_chip *chip;
-   int offset_cs = 21; // Replace with your GPIO pin number for CS
+   int offset_crst = 21; // Replace with your GPIO pin number for CRST
    chip = gpiod_chip_open("/dev/gpiochip4"); // Replace 4 with the appropriate chip number
    
-    *cs= gpiod_chip_get_line(chip, offset_cs);
+    *crst= gpiod_chip_get_line(chip, offset_crst);
 
     if (!chip) {
         perror("Open chip failed");
         return 1;
     }
 
-       if (!*cs) {
+       if (!*crst) {
         perror("Get line failed");
         gpiod_chip_close(chip);
         return 1;
     }
     
-   configure_output(*cs, &a, 0);
-   // usleep(1000);
-  // configure_output(*cs, &a, 1);
+   configure_output(*crst, &a, 0);
+
    
    fd = open(I2C_BUS, O_RDWR);
         // Open the I2C bus
